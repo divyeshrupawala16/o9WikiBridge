@@ -7,9 +7,8 @@ function getRuleSyntax(rules, ruleName) {
   return rule ? rule.syntax : null;
 }
 
-function convertHtmlToWiki(html, rules) {
-  const headingSyntax = getRuleSyntax(rules, "Heading Levels");
-  const tableSyntax = getRuleSyntax(rules, "Create a Table") || '{| class="wikitable"\n|Content goes in here\n|}';
+function convertHtmlToWiki(html, rules) {  
+  const tableSyntax = getRuleSyntax(rules, "Create a Table");
   const tableStartSyntax = tableSyntax.start ? tableSyntax.start : "{|class='wikitable'";
   const tableEndSyntax = tableSyntax.end ? tableSyntax.end : "|}";
   const tableColSyntax = tableSyntax.column ? tableSyntax.column : "||";
@@ -32,8 +31,8 @@ function convertHtmlToWiki(html, rules) {
   function processInline(node) {
     let text = '';
     node.childNodes.forEach(child => {
-      if (child.nodeType === 3) {
-        text += child.textContent;
+      if (child.nodeType === 3) {       
+          text += child.textContent;        
       } else if (child.nodeName === 'STRONG' || child.nodeName === 'B') {
         text += boldSyntax + child.textContent + boldSyntax;
       } else if (child.nodeName === 'EM' || child.nodeName === 'I') {
@@ -44,9 +43,9 @@ function convertHtmlToWiki(html, rules) {
         //let imageHeading = findNearestHeading(imageIndex, extractedImages.length);
         //imageHeading = imageHeading ? (imageHeading + "_"+imageIndex) : "NoImage"
         let imageHeading = "o9wiki-image-" + imageIndex;
-        text+= imageStartSyntax;
+        text+= '\n\n' + imageStartSyntax;
         text += `|[[File:${imageHeading}.png]]`;    
-        text+= imageEndSyntax;
+        text+= "\n" + tableEndSyntax + "\n\n";
         imageIndex = imageIndex +1;
       } else if (child.nodeName === 'A') {
         // External/internal link
@@ -56,6 +55,8 @@ function convertHtmlToWiki(html, rules) {
         } else {
           text += child.textContent;
         }
+      } else if (child.nodeName === "UL" || child.nodeName === "OL") {
+        text += processList(child) + '\n';
       } else {
         text += processInline(child);
       }
@@ -73,7 +74,7 @@ function convertHtmlToWiki(html, rules) {
     return text;
   }
 
-function processList(node, level = 1) {
+  function processList(node, level = 1) {
   let out = '';
 
   // Decide if we need bullets (UL) or numbers (OL)
@@ -89,7 +90,7 @@ function processList(node, level = 1) {
       } else {
         // For OL, get 'value' attribute or use current numbering
         let value = li.getAttribute && li.getAttribute('value');
-        prefix = ((value ? value : numbering) + '.').padStart(level + 2, ' ');
+        prefix = ((value ? value : numbering) + '.').padStart(level + 2, '');
         numbering++;
       }
       out += prefix + processInline(li) + '\n';
@@ -106,7 +107,11 @@ function processList(node, level = 1) {
 }
 
   function processTable(tableNode) {
-    let out = tableStartSyntax;
+    let out = "";
+    if (isHeaderOpen) {
+      //out = "\n" + tableEndSyntax + "\n\n";
+    }
+    out += tableStartSyntax;
     let rows = tableNode.querySelectorAll('tr');
     let isSingleRow = rows.length === 1;
     rows.forEach((row, i) => {
@@ -120,7 +125,10 @@ function processList(node, level = 1) {
         }
       } else {
         out += '|-\n';
-        for (let cell of cells) {
+        for (let cell of cells) {          
+          if (cell.textContent && cell.textContent == "-") {
+            cell.textContent = "";            
+          }
           let text = processInline(cell);
           // Remove concatenated empty quotes at the end (one or more pairs of '')
           text = text.replace(/^(')+|(')+$/g, '');//text.replace(/('')+$/g, ''); 
@@ -143,10 +151,12 @@ function processList(node, level = 1) {
       let level = parseInt(node.nodeName.charAt(1));
       let headingWiki = "";
       if (isHeaderOpen) {
-        headingWiki += "\n|}\n\n";
+        // use configured table end syntax (was hardcoded '|}')
+        headingWiki += "\n" + tableEndSyntax + "\n\n";
       }
       headingWiki += '='.repeat(level) + node.textContent.trim() + '='.repeat(level);
-      headingWiki += '\n\n {| class="wikitable"'
+      // use configured table start syntax instead of hardcoded '{| class="wikitable"'
+      headingWiki += '\n\n' + tableStartSyntax;
       isHeaderOpen = true;
       return headingWiki + '\n|\n\n';
     }
@@ -182,6 +192,25 @@ function processList(node, level = 1) {
 
   var wikiMarkup = processNode(doc.body);
   wikiMarkup += "|}";
+
+  // Remove empty wikitable blocks created when headings open a table but no rows were added.
+  // Uses the configured tableStartSyntax / tableEndSyntax to find table blocks,
+  // and deletes those whose inner content contains only whitespace or pipe characters.
+  try {
+    const startEsc = tableStartSyntax.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const endEsc = tableEndSyntax.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const emptyTableRegex = new RegExp(startEsc + '[\\s\\S]*?' + endEsc, 'g');
+
+    wikiMarkup = wikiMarkup.replace(emptyTableRegex, match => {
+      const inner = match.slice(tableStartSyntax.length, match.length - tableEndSyntax.length);
+      // if inner contains only whitespace or pipe characters (no real rows/content), remove whole block
+      if (/^[\s\|]*$/.test(inner)) return '';
+      return match;
+    });
+  } catch (e) {
+    // if anything fails, fall back to original markup
+    console.warn('Empty table cleanup failed:', e);
+  }
   return wikiMarkup.replace(/\n{3,}/g, '\n\n');
 }
 
@@ -364,7 +393,10 @@ function handleDocFile(file) {
       .then(function(result) {
         htmlContent = result.value;
         //document.getElementById('docStatus').textContent = "✓ Document loaded";
-        
+
+        // FIX: Apply ordered list numbering fix
+        htmlContent = fixOrderedListNumbering(htmlContent);
+
         if (!rules || !htmlContent) return;
         const wikiMarkup = convertHtmlToWiki(htmlContent, rules);
         // document.getElementById('outputArea').value = wikiMarkup;
@@ -384,6 +416,66 @@ function handleDocFile(file) {
     } else {
         processTextFile(file);
     }
+}
+
+function fixOrderedListNumbering(html) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    
+    let globalCounter = 1; // Track the global list counter
+    let lastListDepth = 0;
+    const counterStack = [1]; // Stack to handle nested lists
+    
+    // Find all OL elements
+    const allElements = doc.body.querySelectorAll('*');
+    
+    allElements.forEach(element => {
+        if (element.nodeName === 'OL') {
+            // Get all direct LI children
+            const listItems = Array.from(element.children).filter(child => child.nodeName === 'LI');
+            
+            listItems.forEach((li, index) => {
+                // Check if this LI already has a value attribute from Word
+                const existingValue = li.getAttribute('value');
+                
+                if (existingValue) {
+                    // Use the value from Word document
+                    globalCounter = parseInt(existingValue);
+                } else if (index === 0 && element.previousElementSibling) {
+                    // This is the first item in a new OL
+                    // Check if previous sibling was also an OL (continuing list)
+                    let prevOL = element.previousElementSibling;
+                    
+                    // Look backwards for the last OL before this one
+                    let searchNode = element.previousElementSibling;
+                    while (searchNode && searchNode.nodeName !== 'OL') {
+                        searchNode = searchNode.previousElementSibling;
+                    }
+                    
+                    if (searchNode && searchNode.nodeName === 'OL') {
+                        // Found a previous OL, continue numbering
+                        const prevItems = searchNode.querySelectorAll('li');
+                        if (prevItems.length > 0) {
+                            const lastItem = prevItems[prevItems.length - 1];
+                            const lastValue = lastItem.getAttribute('value') || lastItem.getAttribute('data-counter');
+                            globalCounter = lastValue ? parseInt(lastValue) + 1 : globalCounter;
+                        }
+                    } else {
+                        // No previous OL found, reset to 1
+                        globalCounter = 1;
+                    }
+                }
+                
+                // Set the value attribute
+                li.setAttribute('value', globalCounter);
+                li.setAttribute('data-counter', globalCounter);
+                
+                globalCounter++;
+            });
+        }
+    });
+    
+    return doc.body.innerHTML;
 }
 
 function formatFileSize(bytes) {

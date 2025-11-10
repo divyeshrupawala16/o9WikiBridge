@@ -1,0 +1,199 @@
+{
+  "rules": [
+    {
+      "name": "Heading Levels",
+      "description": "Defines Wiki markup for headings of different levels.",
+      "syntax": {
+        "first": "==Heading==",
+        "second": "===Heading===",
+        "third": "====Heading===="
+      },
+      "examples": [
+        "==Name==",
+        "===Name===",
+        "====Name===="
+      ]
+    },
+    {
+      "name": "Create a Box for Content",
+      "description": "Wrap content in a Wiki table box for a clean look.",
+      "syntax": "{| class=\"wikitable\"\n|Content goes in here\n|}",
+      "examples": [
+        "{| class=\"wikitable\"\n|This is boxed content\n|}"
+      ]
+    },
+    {
+      "name": "Create a Different Page for a Topic",
+      "description": "Link to a different Wiki page.",
+      "syntax": "'''[[Page Name]]'''",
+      "examples": [
+        "'''[[Install & Launch the o9 Platform Mobile App for iOS]]'''"
+      ]
+    },
+    {
+      "name": "Customize the Sidebar",
+      "description": "Add a page to the sidebar via MediaWiki:Sidebar.",
+      "steps": [
+        "Open MediaWiki:Sidebar page in browser.",
+        "Click Edit.",
+        "Enter the page name under navigation.",
+        "Save changes."
+      ],
+      "example": "**Table of Contents|Table of Contents"
+    },
+    {
+      "name": "For a Forced TOC",
+      "description": "Force a table of contents to appear on the page.",
+      "syntax": "__FORCETOC__"
+    },
+    {
+      "name": "At the End of Each New Page Provide Category",
+      "description": "Add a category at the end of a Wiki page.",
+      "syntax": "[[Category: <category name>]]",
+      "examples": [
+        "[[Category: <The o9 Excel Add-in>‎]]"
+      ]
+    },
+    {
+      "name": "Color a Text",
+      "description": "Color text using HTML span with style.",
+      "syntax": "<span style=\"color:#000080\">'''[[Page Name]]'''</span>",
+      "examples": [
+        "<span style=\"color:#000080\">'''[[Picklist in Action Button]]'''</span>"
+      ],
+      "reference": "https://meta.wikimedia.org/wiki/Help:Text_color"
+    },
+    {
+      "name": "Create a Table",
+      "description": "Create tables with headers and rows.",
+      "syntax": {
+		  "start": "{|class='wikitable'\n",
+		  "end": "|}",
+		  "column": "|"
+	  },
+      "examples": [
+        "{| class=\"wikitable\"\n!Header1\n!Header2\n|-\n|Row1Col1\n|Row1Col2\n|}"
+      ]
+    },
+    {
+      "name": "Single Heading for 2 Columns in a Table",
+      "description": "Create tables with merged columns or rows for headings.",
+      "syntax": "{| class=\"wikitable\"\n!colspan=\"8\"|Stores\n|-\n|'''VariableName'''\n|stores\n|-\n|'''Query'''\n|select([Store].[Store_ID] *[Store].[Type] *[Store].[Size]);\n|-\n|colspan=\"2\"|Leave the '''Primary''' button blank\n|-\n|'''VariableType'''\n|Query\n|}",
+      "examples": [
+        "{| class=\"wikitable\"\n!rowspan=\"2\"|If you want to:\n!colspan=\"4\"|Then\n|-\n!In Staging API Config\n!In Action Button Config\n|-\n|\n|\n|\n|}"
+      ]
+    },
+    {
+      "name": "Set Specific Width of Table Columns & Merge two Columns",
+      "description": "Set width for table columns and merge columns.",
+      "syntax": "{| class=\"wikitable\"\n| colspan=\"2\" | Test 1 (Both the columns are merged)\n|-\n| style=\"width: 30%\"| Test 2 (The width of this column is 30%)\n| style=\"width: 70%\"| Test 3 (The width of this column is 70%)\n|}",
+      "examples": [
+        "Test 1 (Both the columns are merged)",
+        "Test 2 (The width of this column is 30%)",
+        "Test 3 (The width of this column is 70%)"
+      ]
+    },
+    {
+      "name": "Numbering",
+      "description": "Create numbered lists.",
+      "syntax": "#"
+    },
+    {
+      "name": "Bullets",
+      "description": "Create bullet lists and sub-lists.",
+      "syntax": "*"
+    },
+    {
+      "name": "Note",
+      "description": "Display a note in a formatted table.",
+      "syntax": "{| class=\"wikitable sortable\"\n|-\n| '''Note''' ||\n<content goes in here>\n|}"
+    },
+    {
+      "name": "Note with Icon",
+      "description": "Note with an icon in a table.",
+      "syntax": "{| class=\"wikitable sortable\"\n|-\n|[[File:Note Icon1.png]]||Content\n|}"
+    },
+    {
+      "name": "Links",
+      "description": "Insert external links with or without name.",
+      "syntax": {
+        "url_only": "* For more details, click https://example.com",
+        "named_url": "* For more details, click [https://example.com Example Name]"
+      }
+    },
+    {
+      "name": "Bold and Italics",
+      "description": "Apply bold and italic formatting.",
+      "syntax": {
+        "normal": "",
+        "bold": "'''",
+        "italic": "''",
+        "big": "<big>"
+      }
+    },
+    {
+      "name": "Icons",
+      "description": "Insert icons from uploaded files.",
+      "steps": [
+        "Save the relevant icon in a folder.",
+        "Ensure you have one folder where you can save all your icons so that in case you need that same icon in future, you know where to look for it.",
+        "Check if you need to crop the icon.",
+        "Ensure all your icons are mostly of the same size.",
+        "Upload the icon in wiki.",
+        "Put the following format exactly wherever you want to put the icon: '''(''' [[File:<type the name of the icon with which you have saved>.png]] ''')'''",
+        "Click Edit on the upper-right of the page and then again click Save Changes in case the icon is not getting reflected."
+      ],
+      "examples": [
+        "Click Add a New Code Package icon '''(''' [[File:Download Report Icon.png]] ''')''' next to PythonScript.",
+        "Click '''(''' [[File:Download Report Icon.png]] ''')''' next to PythonScript."
+      ]
+    },
+    {
+      "name": "Images",
+      "description": "Insert images from uploaded files.",
+      "steps": [
+        "Save the relevant image in a folder.",
+        "Ensure you have one folder where you can save all your images.",
+        "Check if you need to crop the image.",
+        "Ensure all your images are mostly of the same size.",
+        "Upload the image in wiki.",
+        "Put the following format exactly wherever you want to put the image: {| class=\"wikitable\" |[[File:<type the name of the image with which you have saved>.png|frame|left]] |}",
+        "Click Edit on the upper-right of the page and then again click Save Changes in case the image is not getting reflected."
+      ],
+      "syntax": {
+        "start":"{|class='wikitable'\n",
+        "end":"\n|}"
+      },
+      "examples": [
+        "{| class=\"wikitable\" |[[File:Re enter the Same Value in Editable Measure1.jpg|1000px|left]] |}"
+      ]
+    },
+    {
+      "name": "Double Curly Brackets",
+      "description": "Insert word templates using double curly brackets.",
+      "syntax": {
+        "block": "<pre>{{Location}}</pre>",
+        "inline": "<nowiki>{{Location}}</nowiki>"
+      }
+    },
+    {
+      "name": "URL as Texts",
+      "description": "Display URL as plain text, not as a clickable link.",
+      "syntax": "<nowiki>https://example.com</nowiki>"
+    },
+    {
+      "name": "Code Indentation (Pre-formatted Code)",
+      "description": "Add preformatted code blocks.",
+      "syntax": {
+        "pre": "<pre>code goes here</pre>",
+        "source": "<source>code goes here</source>"
+      },
+      "note": "Prefer <pre> for most cases to avoid syntax highlighting errors."
+    }
+  ],
+  "references": [
+    "https://www.mediawiki.org/wiki/Manual:Interface/Sidebar",
+    "https://meta.wikimedia.org/wiki/Help:Text_color",
+    "https://www.mediawiki.org/wiki/Category:Pages_with_syntax_highlighting_errors"
+  ]
+}
