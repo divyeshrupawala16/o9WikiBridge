@@ -28,7 +28,7 @@ function convertHtmlToWiki(html, rules) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, 'text/html');
 
-  function processInline(node) {
+  function processInline(node, isTriggeredFromTable = false) {
     let text = '';
     node.childNodes.forEach(child => {
       if (child.nodeType === 3) {       
@@ -42,11 +42,16 @@ function convertHtmlToWiki(html, rules) {
       } else if (child.nodeName === "IMG") {
         //let imageHeading = findNearestHeading(imageIndex, extractedImages.length);
         //imageHeading = imageHeading ? (imageHeading + "_"+imageIndex) : "NoImage"
-        let imageHeading = "o9wiki-image-" + imageIndex;
-        text+= '\n\n' + imageStartSyntax;
-        text += `|[[File:${imageHeading}.png]]`;    
-        text+= "\n" + tableEndSyntax + "\n\n";
-        imageIndex = imageIndex +1;
+        if (isTriggeredFromTable) {
+          text += `[[File:User Workflow Icon.png]]`; 
+        } else {
+          let imageHeading = "o9wiki-image-" + imageIndex;
+          text+= '\n\n' + imageStartSyntax;
+          text += `|[[File:${imageHeading}.png]]`;    
+          text+= "\n" + tableEndSyntax + "\n\n";
+          imageIndex = imageIndex +1;
+        }
+        
       } else if (child.nodeName === 'A') {
         // External/internal link
         const href = child.getAttribute('href');
@@ -58,10 +63,10 @@ function convertHtmlToWiki(html, rules) {
       } else if (child.nodeName === "UL" || child.nodeName === "OL") {
         text += processList(child) + '\n';
       } else {
-        text += processInline(child);
+        text += processInline(child, isTriggeredFromTable);
       }
 
-      if (text && child.childNodes.length) {
+      if (text && text.indexOf('File:') === -1 && child.childNodes.length) {
         child.childNodes.forEach(grandChild => {
           if (grandChild.nodeName === "IMG") {           
             text += `[[File:User Workflow Icon.png]]`; 
@@ -74,37 +79,123 @@ function convertHtmlToWiki(html, rules) {
     return text;
   }
 
-  function processList(node, level = 1) {
+  function processInlineForList(node) {
+  let text = '';
+  
+  if (!node) return text;
+  
+  if (node.nodeType === 3) {
+    return node.textContent;
+  }
+  
+  // Get syntax from rules or use defaults
+  const boldSyntax = rules ? (getRuleSyntax(rules, "Bold and Italics")?.bold || "'''") : "'''";
+  const italicSyntax = rules ? (getRuleSyntax(rules, "Bold and Italics")?.italic || "''") : "''";
+  
+  if (node.nodeName === 'STRONG' || node.nodeName === 'B') {
+    text += boldSyntax + node.textContent + boldSyntax;
+  } else if (node.nodeName === 'EM' || node.nodeName === 'I') {
+    text += italicSyntax + node.textContent + italicSyntax;
+  } else if (node.nodeName === 'SPAN' && node.getAttribute && node.getAttribute('style')?.includes('color')) {
+    text += `<span style="${node.getAttribute('style')}">${node.textContent}</span>`;
+  } else if (node.nodeName === 'A') {
+    const href = node.getAttribute && node.getAttribute('href');
+    if (href) {
+      text += `[${href} ${node.textContent}]`;
+    } else {
+      text += node.textContent;
+    }
+  } else if (node.nodeName !== 'UL' && node.nodeName !== 'OL') {
+    // Process child nodes recursively
+    if (node.childNodes) {
+      node.childNodes.forEach(child => {
+        text += processInlineForList(child);
+      });
+    }
+  }
+  
+  return text;
+}
+
+// STEP 2: Replace your existing processList function with this:
+
+function processList(node, level = 1) {
   let out = '';
 
   // Decide if we need bullets (UL) or numbers (OL)
   let isUL = node.nodeName === "UL";
-  let bullet = isUL ? bulletSyntax : '';
+  const bulletSyntax = getRuleSyntax(rules, "Bullets") || "*";
   let numbering = 1;
+  let useLetters = false;
 
   node.childNodes.forEach(li => {
     if (li.nodeName === "LI") {
-      let prefix;
-      if (isUL) {
-        prefix = bullet.repeat(level);
-      } else {
-        // For OL, get 'value' attribute or use current numbering
-        let value = li.getAttribute && li.getAttribute('value');
-        prefix = ((value ? value : numbering) + '.').padStart(level + 2, '');
-        numbering++;
-      }
-      out += prefix + processInline(li) + '\n';
+      // First, collect only text content (exclude nested lists)
+      let textContent = '';
+      li.childNodes.forEach(child => {
+        if (child.nodeType === 3) { // Text node
+          textContent += child.textContent;
+        } else if (child.nodeName !== 'UL' && child.nodeName !== 'OL') {
+          // Process inline elements but not nested lists
+          textContent += processInlineForList(child);
+        }
+      });
 
-      // Nested lists
+      // Only add prefix if there's actual text content
+      if (textContent.trim()) {
+        let prefix;
+        if (isUL) {
+          prefix = bulletSyntax.repeat(1) + ' ';
+        } else {
+          // For OL, check if we should use letters based on level or list-style-type
+          useLetters = false;
+          
+          // Check if parent OL has list-style-type attribute
+          const listStyle = node.getAttribute && node.getAttribute('style');
+          if (listStyle && listStyle.includes('list-style-type')) {
+            useLetters = listStyle.includes('lower-alpha') || 
+                         listStyle.includes('upper-alpha') ||
+                         listStyle.includes('lower-latin') ||
+                         listStyle.includes('upper-latin');
+          }
+          
+          // Alternative: Use letters for nested lists (level > 1)
+          if (level > 1 && !listStyle) {
+            useLetters = true;
+          }
+
+          if (useLetters) {
+            // Convert number to letter (1=a, 2=b, etc.)
+            let value = li.getAttribute && li.getAttribute('value');
+            let letterIndex = (value ? parseInt(value) : numbering) - 1;
+            let letter = String.fromCharCode(97 + (letterIndex % 26)); // 97 is 'a'
+            prefix = ''.repeat(level * 2) + letter + '. ';
+          } else {
+            // Use numbers for top-level or when explicitly numeric
+            let value = li.getAttribute && li.getAttribute('value');
+            let num = value ? value : numbering;
+            prefix = ''.repeat((level - 1) * 2) + num + '. ';
+          }
+          numbering++;
+        }
+        
+        if (useLetters) {
+          out += ":";  
+        }
+        out += prefix + textContent.trim() + '<br>\n';       
+      }
+
+      // Handle nested lists separately
       li.childNodes.forEach(child => {
         if (child.nodeName === "UL" || child.nodeName === "OL") {
-          out += processList(child, level + 1);
+            out += processList(child, level + 1);
         }
       });
     }
   });
   return out;
 }
+
 
   function processTable(tableNode) {
     let out = "";
@@ -118,7 +209,7 @@ function convertHtmlToWiki(html, rules) {
       let cells = row.children;
       if (i === 0 && !isSingleRow) { // Header row
         for (let cell of cells) {
-          let text = processInline(cell);
+          let text = processInline(cell, true);
           // Remove concatenated empty quotes at the end (one or more pairs of '')
           text = text.replace(/^(')+|(')+$/g, '');//text.replace(/('')+$/g, ''); 
           out += '!' + text + '\n';
@@ -129,10 +220,11 @@ function convertHtmlToWiki(html, rules) {
           if (cell.textContent && cell.textContent == "-") {
             cell.textContent = "";            
           }
-          let text = processInline(cell);
+          let text = processInline(cell, true);
           // Remove concatenated empty quotes at the end (one or more pairs of '')
           text = text.replace(/^(')+|(')+$/g, '');//text.replace(/('')+$/g, ''); 
-          out += tableColSyntax + text + '\n';
+          let colSept = text.startsWith(bulletSyntax) || text.startsWith(numberingSyntax) ? "\n" : " ";
+          out += tableColSyntax + colSept + text + '\n';
         }
       }
     });
@@ -366,6 +458,52 @@ docUploadSection.addEventListener('drop', (e) => {
     }
 });
 
+// Add this helper function to skip pages
+function skipFirstPages(html, pagesToSkip) {
+  if (pagesToSkip <= 0) return html;
+  
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  
+  // Look for page breaks (Word usually uses <hr> or specific page break markers)
+  const pageBreaks = doc.querySelectorAll('hr, br[style*="page-break"], div[style*="page-break"]');
+  
+  if (pageBreaks.length >= pagesToSkip) {
+    // Remove everything before the Nth page break
+    const targetBreak = pageBreaks[pagesToSkip - 1];
+    let currentNode = doc.body.firstChild;
+    
+    while (currentNode && currentNode !== targetBreak) {
+      const nextNode = currentNode.nextSibling;
+      currentNode.remove();
+      currentNode = nextNode;
+    }
+    
+    // Also remove the page break itself
+    if (targetBreak) targetBreak.remove();
+  } else {
+    // If page breaks not found, try removing first N headings/sections
+    const headings = doc.querySelectorAll('h1, h2, h3');
+    if (headings.length > pagesToSkip) {
+      for (let i = 0; i < pagesToSkip && i < headings.length; i++) {
+        const heading = headings[i];
+        // Remove all siblings until next heading
+        let currentNode = heading;
+        while (currentNode) {
+          const nextNode = currentNode.nextSibling;
+          if (nextNode && nextNode.nodeName && /^H[1-6]$/.test(nextNode.nodeName)) {
+            break; // Stop at next heading
+          }
+          currentNode.remove();
+          currentNode = nextNode;
+        }
+      }
+    }
+  }
+  
+  return doc.body.innerHTML;
+}
+
 function handleDocFile(file) {
     if (!rules) {
         alert('Please upload wiki rules first or use default rules.');
@@ -393,6 +531,9 @@ function handleDocFile(file) {
       .then(function(result) {
         htmlContent = result.value;
         //document.getElementById('docStatus').textContent = "✓ Document loaded";
+
+        // ✅ ADD THIS LINE TO SKIP FIRST 4 PAGES
+        htmlContent = skipFirstPages(htmlContent, 6);
 
         // FIX: Apply ordered list numbering fix
         htmlContent = fixOrderedListNumbering(htmlContent);
@@ -422,15 +563,31 @@ function fixOrderedListNumbering(html) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
     
-    let globalCounter = 1; // Track the global list counter
-    let lastListDepth = 0;
-    const counterStack = [1]; // Stack to handle nested lists
+    let globalCounter = 1;
+    let lastWasTable = false;
     
-    // Find all OL elements
+    // Find all elements in body
     const allElements = doc.body.querySelectorAll('*');
     
     allElements.forEach(element => {
+        // Reset counter when we encounter a TABLE
+        if (element.nodeName === 'TABLE') {
+            globalCounter = 1;
+            lastWasTable = true;
+            return;
+        }
+        
         if (element.nodeName === 'OL') {
+            // Check if this OL is inside a table
+            const isInsideTable = element.closest('table') !== null;
+            
+            // If we just saw a table or we're inside a table, reset
+            if (lastWasTable || isInsideTable) {
+                globalCounter = 1;
+            }
+            
+            lastWasTable = false;
+            
             // Get all direct LI children
             const listItems = Array.from(element.children).filter(child => child.nodeName === 'LI');
             
@@ -443,12 +600,15 @@ function fixOrderedListNumbering(html) {
                     globalCounter = parseInt(existingValue);
                 } else if (index === 0 && element.previousElementSibling) {
                     // This is the first item in a new OL
-                    // Check if previous sibling was also an OL (continuing list)
-                    let prevOL = element.previousElementSibling;
-                    
                     // Look backwards for the last OL before this one
                     let searchNode = element.previousElementSibling;
+                    
                     while (searchNode && searchNode.nodeName !== 'OL') {
+                        // If we hit a table, reset
+                        if (searchNode.nodeName === 'TABLE') {
+                            globalCounter = 1;
+                            break;
+                        }
                         searchNode = searchNode.previousElementSibling;
                     }
                     
@@ -472,6 +632,8 @@ function fixOrderedListNumbering(html) {
                 
                 globalCounter++;
             });
+        } else if (element.nodeName !== 'TABLE') {
+            lastWasTable = false;
         }
     });
     
