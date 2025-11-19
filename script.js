@@ -1,6 +1,37 @@
 let rules = null;
 let htmlContent = "";
 
+let imageRegistry = [];
+let docNameGlobal = '';
+
+// ============================================
+// STEP 1: Pre-process HTML to add data-image-id to all <img> tags
+// ============================================
+function preprocessHtmlWithImageIds(html, docFileName) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  
+  // Find ALL <img> tags in document order
+  const allImages = doc.querySelectorAll('img');
+  
+  console.log(`Found ${allImages.length} images in HTML`);
+  
+  // Add sequential data-image-id attribute to each
+  allImages.forEach((img, index) => {
+    const imageId = index + 1; // 1-based indexing
+    img.setAttribute('data-image-id', imageId);
+    
+    // Also add the standardized filename as data attribute for easy access
+    const extension = 'png'; // Default to png for mammoth-generated images
+    const standardName = `${docFileName}-${imageId}.${extension}`;
+    img.setAttribute('data-image-name', standardName);
+    
+    console.log(`Tagged image ${imageId} as ${standardName}`);
+  });
+  
+  return doc.documentElement.outerHTML;
+}
+
 // HTML → Wiki Markup converter
 function getRuleSyntax(rules, ruleName) {
   const rule = rules.rules.find(r => r.name === ruleName);
@@ -40,19 +71,26 @@ function convertHtmlToWiki(html, rules, docFileName) {
       } else if (child.nodeName === 'SPAN' && child.getAttribute('style')?.includes('color')) {
         text += `<span style="${child.getAttribute('style')}">${child.textContent}</span>`;
       } else if (child.nodeName === "IMG") {
-        //let imageHeading = findNearestHeading(imageIndex, extractedImages.length);
-        //imageHeading = imageHeading ? (imageHeading + "_"+imageIndex) : "NoImage"
-        if (isTriggeredFromTable) {
-          text += `[[File:${docFileName}-${imageIndex}.png]]`; 
-        } else {          
-          text+= '\n\n' + tableStartSyntax + '\n |- \n | ';
-          text += `[[File:${docFileName}-${imageIndex}.png]]`; 
-          text+= "\n" + tableEndSyntax + "\n\n";
-          imageIndex = imageIndex +1;
-        }
+        // ⭐ Get the image ID from data attribute
+        const imageId = child.getAttribute('data-image-id');
+        const imageName = child.getAttribute('data-image-name');
         
+        if (imageId && imageName) {
+          console.log(`Processing image ID ${imageId}: ${imageName}`);
+          
+          if (isTriggeredFromTable) {
+            text += `[[File:${imageName}]]`; 
+          } else {          
+            text += '\n\n' + tableStartSyntax + '\n |- \n | ';
+            text += `[[File:${imageName}]]`; 
+            text += "\n" + tableEndSyntax + "\n\n";
+          }
+        } else {
+          console.warn('Image found without ID:', child);
+          // Fallback: try to find in registry by any means
+          text += '[[File:unknown-image.png]]';
+        }
       } else if (child.nodeName === 'A') {
-        // External/internal link
         const href = child.getAttribute('href');
         if (href) {
           text += `[${href} ${child.textContent}]`;
@@ -65,11 +103,17 @@ function convertHtmlToWiki(html, rules, docFileName) {
         text += processInline(child, isTriggeredFromTable);
       }
 
+      // Handle nested images (grandchildren)
       if (text && text.indexOf('File:') === -1 && child.childNodes.length) {
         child.childNodes.forEach(grandChild => {
-          if (grandChild.nodeName === "IMG") {           
-            text += `[[File:${docFileName}-${imageIndex}.png]]`;
-            imageIndex = imageIndex +1;
+          if (grandChild.nodeName === "IMG") {
+            const imageId = grandChild.getAttribute('data-image-id');
+            const imageName = grandChild.getAttribute('data-image-name');
+            
+            if (imageId && imageName) {
+              console.log(`Processing nested image ID ${imageId}: ${imageName}`);
+              text += `[[File:${imageName}]]`;
+            }
           }
         });
       }
@@ -510,38 +554,38 @@ function handleDocFile(file) {
         return;
     }
 
-    // Show file info
     fileName.textContent = file.name;
     fileSize.textContent = formatFileSize(file.size);
     fileType.textContent = file.type || 'Unknown';
     fileInfo.classList.add('show');
 
-    // Show processing
     processing.style.display = 'block';
     originalContent.value = '';
     wikiOutput.value = '';
     copyBtn.disabled = true;
 
-    // Process file based on type
     if (file.name.endsWith('.docx')) {
+      // First extract images to build registry
       extractFromDOCX(file);
 
       mammoth.convertToHtml({arrayBuffer: file})
       .then(function(result) {
         htmlContent = result.value;
-        //document.getElementById('docStatus').textContent = "✓ Document loaded";
-
-        // ✅ ADD THIS LINE TO SKIP FIRST 4 PAGES
+        
+        // Skip pages
         htmlContent = skipFirstPages(htmlContent, 6);
-
-        // FIX: Apply ordered list numbering fix
         htmlContent = fixOrderedListNumbering(htmlContent);
 
         if (!rules || !htmlContent) return;
+        
         const docNameWithoutExt = file.name.split('.').slice(0, -1).join('.');
+        
+        // ⭐ CRITICAL: Preprocess HTML to add image IDs
+        htmlContent = preprocessHtmlWithImageIds(htmlContent, docNameWithoutExt);
+        
+        console.log('Preprocessed HTML with image IDs');
+        
         const wikiMarkup = convertHtmlToWiki(htmlContent, rules, docNameWithoutExt);
-        // document.getElementById('outputArea').value = wikiMarkup;
-        // document.getElementById('copyBtn').disabled = false;
 
         wikiOutput.value = wikiMarkup;
         processing.style.display = 'none';
@@ -552,8 +596,6 @@ function handleDocFile(file) {
       .then(function(rawtext) {
         originalContent.value = rawtext.value;
       });
-
-      
     } else {
         processTextFile(file);
     }
@@ -761,105 +803,114 @@ function parseRelationships(relsXml) {
 
 async function extractFromDOCX(file) {
   extractedImages = [];
+  imageRegistry = [];
   imagesGrid.innerHTML = '';
   imagesGrid.style.display = 'none';
   downloadBtn.style.display = 'none';
 
   try {
-      // DOCX files are actually ZIP archives, so we can extract images directly
       const zip = await JSZip.loadAsync(file);
       const mediaFiles = [];
 
-       // First, extract headings from document.xml
-        try {
-            const documentXml = await zip.file('word/document.xml').async('text');
-            extractHeadingsFromDocumentXML(documentXml);
-        } catch (xmlError) {
-            console.warn('Could not extract headings from DOCX:', xmlError);
-        }
+      // Extract headings
+      try {
+          const documentXml = await zip.file('word/document.xml').async('text');
+          extractHeadingsFromDocumentXML(documentXml);
+      } catch (xmlError) {
+          console.warn('Could not extract headings:', xmlError);
+      }
 
-        // Step 2: Parse document.xml to get image order
-        let orderedImageRefs = [];
-        try {
-            const documentXml = await zip.file('word/document.xml').async('text');
-            orderedImageRefs = extractImageOrderFromDocument(documentXml);
-        } catch (error) {
-            console.warn('Could not extract image order:', error);
-        }
+      // Get image order from document
+      let orderedImageRefs = [];
+      try {
+          const documentXml = await zip.file('word/document.xml').async('text');
+          orderedImageRefs = extractImageOrderFromDocument(documentXml);
+      } catch (error) {
+          console.warn('Could not extract image order:', error);
+      }
 
-        // Step 3: Parse relationships to map rId to actual filenames
-        let relationshipMap = {};
-        try {
-            const relsXml = await zip.file('word/_rels/document.xml.rels').async('text');
-            relationshipMap = parseRelationships(relsXml);
-        } catch (error) {
-            console.warn('Could not parse relationships:', error);
-        }
+      // Parse relationships
+      let relationshipMap = {};
+      try {
+          const relsXml = await zip.file('word/_rels/document.xml.rels').async('text');
+          relationshipMap = parseRelationships(relsXml);
+      } catch (error) {
+          console.warn('Could not parse relationships:', error);
+      }
 
-        // Step 4: Collect all media files
-        const mediaFileMap = {};
-        zip.forEach((relativePath, zipEntry) => {
-            if (relativePath.startsWith('word/media/') && 
-                (relativePath.endsWith('.jpg') || relativePath.endsWith('.jpeg') || 
-                  relativePath.endsWith('.png') || relativePath.endsWith('.gif') ||
-                  relativePath.endsWith('.bmp') || relativePath.endsWith('.tiff'))) {
-                const fileName = relativePath.split('/').pop();
-                mediaFileMap[fileName] = zipEntry;
-            }
-        });
+      // Collect media files
+      const mediaFileMap = {};
+      zip.forEach((relativePath, zipEntry) => {
+          if (relativePath.startsWith('word/media/') && 
+              /\.(jpg|jpeg|png|gif|bmp|tiff)$/i.test(relativePath)) {
+              const fileName = relativePath.split('/').pop();
+              mediaFileMap[fileName] = zipEntry;
+          }
+      });
       
-        // Step 5: Process images in document order
-        if (orderedImageRefs.length > 0 && Object.keys(relationshipMap).length > 0) {
-            // Use document order
-            for (const rId of orderedImageRefs) {
-                const mediaPath = relationshipMap[rId];
-                if (mediaPath) {
-                    const fileName = mediaPath.split('/').pop();
-                    const zipEntry = mediaFileMap[fileName];
-                    if (zipEntry) {
-                        mediaFiles.push(zipEntry);
-                    }
-                }
-            }
-        } else {
-            // Fallback: use filename sorting
-            const sortedEntries = Object.entries(mediaFileMap)
-                .sort(([nameA], [nameB]) => {
-                    const numA = parseInt(nameA.match(/\d+/) || [0]);
-                    const numB = parseInt(nameB.match(/\d+/) || [0]);
-                    return numA - numB;
-                })
-                .map(([_, entry]) => entry);
-            mediaFiles.push(...sortedEntries);
-        }
+      // Process in document order
+      if (orderedImageRefs.length > 0 && Object.keys(relationshipMap).length > 0) {
+          for (const rId of orderedImageRefs) {
+              const mediaPath = relationshipMap[rId];
+              if (mediaPath) {
+                  const fileName = mediaPath.split('/').pop();
+                  const zipEntry = mediaFileMap[fileName];
+                  if (zipEntry) {
+                      mediaFiles.push(zipEntry);
+                  }
+              }
+          }
+      } else {
+          const sortedEntries = Object.entries(mediaFileMap)
+              .sort(([nameA], [nameB]) => {
+                  const numA = parseInt(nameA.match(/\d+/) || [0]);
+                  const numB = parseInt(nameB.match(/\d+/) || [0]);
+                  return numA - numB;
+              })
+              .map(([_, entry]) => entry);
+          mediaFiles.push(...sortedEntries);
+      }
 
-        if (mediaFiles.length === 0) {
-            showStatus('No images found in DOCX file.', 'info');
-            return;
-        }
-        
-        for (let i = 0; i < mediaFiles.length; i++) {          
-            const file = mediaFiles[i];
-            const blob = await file.async('blob');
-            const fileName = file.name.split('/').pop();
-            
-            extractedImages.push({
-                name: fileName,
-                blob: blob,
-                url: URL.createObjectURL(blob)
-            });
-        }
+      if (mediaFiles.length === 0) {
+          showStatus('No images found in DOCX file.', 'info');
+          return;
+      }
+      
+      // Get document name without extension
+      const docNameWithoutExt = file.name.split('.').slice(0, -1).join('.');
+      docNameGlobal = docNameWithoutExt; // Store globally
+      
+      // Process each image and build registry
+      for (let i = 0; i < mediaFiles.length; i++) {          
+          const zipFile = mediaFiles[i];
+          const blob = await zipFile.async('blob');
+          const originalFileName = zipFile.name.split('/').pop();
+          const extension = originalFileName.split('.').pop();
+          
+          // Create standardized name matching the HTML preprocessing
+          const standardizedName = `${docNameWithoutExt}-${i + 1}.${extension}`;
+          
+          const imageInfo = {
+              id: i + 1,
+              name: standardizedName,
+              originalName: originalFileName,
+              blob: blob,
+              url: URL.createObjectURL(blob)
+          };
+          
+          extractedImages.push(imageInfo);
+          imageRegistry[i + 1] = imageInfo; // Store by ID for easy lookup
+      }
 
-        // Apply heading-based naming to all extracted images
-        applyHeadingBasedNaming(file.name);
+      console.log('Image Registry created:', imageRegistry);
 
-        if (extractedImages.length > 0) {
-              showStatus(`Found ${extractedImages.length} images!`, 'success');
-              displayImages();
-              downloadBtn.style.display = 'block';
-          } else {
-              showStatus('No images found in the document.', 'info');
-          }      
+      if (extractedImages.length > 0) {
+          showStatus(`Found ${extractedImages.length} images!`, 'success');
+          displayImages();
+          downloadBtn.style.display = 'block';
+      } else {
+          showStatus('No images found in the document.', 'info');
+      }      
   } catch (error) {
       throw new Error('Failed to extract images from DOCX: ' + error.message);
   }
